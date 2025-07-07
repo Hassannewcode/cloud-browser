@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mini Cloud Browser Demo</title>
+
+    <!-- ========================
+         Basic Styling (CSS)
+         ======================== -->
+    <style>
+        :root {
+            --bg-dark: #0d1117;
+            --bg-panel: #161b22;
+            --accent: #58a6ff;
+            --text: #c9d1d9;
+            --font: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg-dark);
+            color: var(--text);
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            height: 100vh;
+        }
+
+        header {
+            background: var(--bg-panel);
+            padding: 0.8rem 1.2rem;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 1.1rem;
+        }
+
+        header a {
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            gap: 1rem;
+            padding: 1rem;
+        }
+
+        /* Sidebar */
+        nav {
+            background: var(--bg-panel);
+            padding: 1rem;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+        }
+
+        nav h2 {
+            margin-bottom: 0.8rem;
+            font-size: 1rem;
+            color: var(--accent);
+        }
+
+        nav label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        nav input[type="text"] {
+            width: 100%;
+            padding: 0.4rem 0.6rem;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            background: #0d1117;
+            color: var(--text);
+            margin-bottom: 0.9rem;
+        }
+
+        nav button {
+            width: 100%;
+            padding: 0.5rem 0;
+            border: none;
+            border-radius: 4px;
+            background: var(--accent);
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        nav button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Remote browser surface */
+        #displayArea {
+            position: relative;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #placeholder {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #7d8590;
+            font-size: 0.95rem;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 0.8rem;
+            font-size: 0.75rem;
+            background: var(--bg-panel);
+            border-top: 1px solid #30363d;
+        }
+
+        @media (max-width: 768px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+            nav {
+                margin-bottom: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- ========================
+         Header Section
+         ======================== -->
+    <header>
+        <h1>Remote Browser Prototype</h1>
+        <a href="https://github.com/novnc/noVNC" target="_blank" rel="noopener">Powered by noVNC</a>
+    </header>
+
+    <!-- ========================
+         Main Content
+         ======================== -->
+    <main>
+        <!-- ------ Sidebar Controls ------ -->
+        <nav>
+            <h2>Connect</h2>
+            <label>
+                WebSocket URL
+                <input type="text" id="wsUrl" placeholder="wss://example.com/websockify" />
+            </label>
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+        </nav>
+
+        <!-- ------ Remote Display Canvas ------ -->
+        <section id="displayArea">
+            <!-- placeholder text until connection established -->
+            <div id="placeholder">Not connected. Please enter your WebSocket URL and click "Connect".</div>
+            <!-- noVNC will inject a canvas here once connected -->
+        </section>
+    </main>
+
+    <!-- ========================
+         Footer Section
+         ======================== -->
+    <footer>
+        © 2025 Mini Cloud Browser Demo. Replace the backend to make it fully functional.
+    </footer>
+
+    <!-- ========================
+         JavaScript Logic
+         ======================== -->
+    <script type="module">
+        /*
+         * High-level flow:
+         * 1. User enters a WebSocket (WS) URL that points to your cloud browser gateway (e.g., websockify → VNC).
+         * 2. We create a noVNC RFB client and pass the WS URL.
+         * 3. All keyboard/mouse input inside the canvas is forwarded, and the remote frame buffer (VNC) is streamed back.
+         *
+         * In real deployments, you’ll provision Linux VMs (or containers) running a headless browser
+         * (usually Chrome/Firefox in Xvfb) exposed over VNC.  Then, websockify translates TCP VNC → WebSockets.
+         */
+
+        import("https://cdn.jsdelivr.net/npm/novnc-core@1.5.0/dist/rfb.js")
+            .then(({ default: RFB }) => {
+                const connectBtn = document.getElementById("connectBtn");
+                const disconnectBtn = document.getElementById("disconnectBtn");
+                const wsUrlInput = document.getElementById("wsUrl");
+                const displayArea = document.getElementById("displayArea");
+                const placeholder = document.getElementById("placeholder");
+                let rfb = null;
+
+                connectBtn.addEventListener("click", () => {
+                    const wsUrl = wsUrlInput.value.trim();
+                    if (!wsUrl) {
+                        alert("Please enter a WebSocket URL.");
+                        return;
+                    }
+                    try {
+                        // Clean old connection if any
+                        if (rfb) rfb.disconnect();
+
+                        rfb = new RFB(displayArea, wsUrl, {});
+                        rfb.addEventListener("connect", () => {
+                            console.log("RFB connected");
+                            placeholder.style.display = "none";
+                            connectBtn.disabled = true;
+                            disconnectBtn.disabled = false;
+                        });
+                        rfb.addEventListener("disconnect", () => {
+                            console.log("RFB disconnected");
+                            placeholder.style.display = "flex";
+                            connectBtn.disabled = false;
+                            disconnectBtn.disabled = true;
+                        });
+                    } catch (err) {
+                        alert("Connection failed: " + err);
+                        console.error(err);
+                    }
+                });
+
+                disconnectBtn.addEventListener("click", () => {
+                    if (rfb) rfb.disconnect();
+                });
+            })
+            .catch((err) => console.error("Failed to load noVNC core:", err));
+    </script>
+</body>
+</html>
